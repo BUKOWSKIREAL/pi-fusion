@@ -1,0 +1,2 @@
+The lead sent an update for the handoff you are working on. Fold it in and continue (or wind down, if that is what it asks):
+<lead_update>

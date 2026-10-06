@@ -1,0 +1,2 @@
+The message above arrived while your sidekick is parked in a wait loop for long-running jobs. If you hand this work to the sidekick and you'd relay the result to the user as soon as it's done rather than at your wrap-up, tell it to report back immediately instead of resuming the wait. You can re-brief it to resume afterwards.
+

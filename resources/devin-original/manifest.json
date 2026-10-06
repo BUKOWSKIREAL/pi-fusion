@@ -1,0 +1,109 @@
+{
+  "binary": "<local-devin-install>/3000.11.3/bin/devin",
+  "binary_sha256": "7ef3859e68d4eabc0115e51898fcd4eab1edde753c27a472349ef551180b38ff",
+  "version_directory": "3000.11.3",
+  "method": "UTF-8 literal spans from local executable; not source-code recovery or proof of active conditional branches",
+  "tool_description_gap": {
+    "offset": 102402738,
+    "length": 4,
+    "hex": "c080c903"
+  },
+  "spans": [
+    {
+      "file": "lead.template.md",
+      "offset": 102384507,
+      "length": 11523,
+      "sha256": "22124cce45e9cd2588961b07e37298de7f5fdf2ccc603e90d5efd33dacbe1faf"
+    },
+    {
+      "file": "sidekick.template.md",
+      "offset": 102649614,
+      "length": 10654,
+      "sha256": "2bdd0b49b36631b0112be7fb3dfa4f83f4ab63743ed6328503818645cc413ae6"
+    },
+    {
+      "file": "lead-variants.txt",
+      "offset": 102396030,
+      "length": 5828,
+      "sha256": "7325e698ce7b8f804c5a178204e2c85bae7157f836391e35b0b8129df3b283b3"
+    },
+    {
+      "file": "sidekick-variants.txt",
+      "offset": 102660269,
+      "length": 1154,
+      "sha256": "c9b93e722b1a0eecc3f61c38ebe5a8eba97dd529aaf4ecf219dc2ab27a18eaab"
+    },
+    {
+      "file": "visual-verification.txt",
+      "offset": 102648494,
+      "length": 1118,
+      "sha256": "16c05a0b097a686c085168fa90ccbf3268c4999f6863c2ccca3f9509d5d83863"
+    },
+    {
+      "file": "first-handoff.txt",
+      "offset": 102401858,
+      "length": 203,
+      "sha256": "38e3997e967fc402f76af48a5b88bd65da67bc41f0f37e0ccc45f7becf4fe927"
+    },
+    {
+      "file": "lead-update-prefix.txt",
+      "offset": 102402066,
+      "length": 139,
+      "sha256": "a7a1dfa946e80cb3bf3907c0428f2bd1dd0a98d1d3447a875dd7a53381e5ada9"
+    },
+    {
+      "file": "lead-update-suffix.txt",
+      "offset": 102402208,
+      "length": 14,
+      "sha256": "7c7c4f31eeabf0a3aaffc73ab7533cfc383835a525c3a799ed62a4e54d73fe9c"
+    },
+    {
+      "file": "first-edit-1.txt",
+      "offset": 102450598,
+      "length": 609,
+      "sha256": "d0346031dd297163cd76ae44e46293d2dd0f5c77214d59566d93ee0b36d56127"
+    },
+    {
+      "file": "first-message-1.template.md",
+      "offset": 102451750,
+      "length": 2071,
+      "sha256": "2ea33d773096312eec49aaad37f601846eef6746bf2daeb6a85a2dd046685329"
+    },
+    {
+      "file": "first-edit-2.txt",
+      "offset": 102451243,
+      "length": 469,
+      "sha256": "cf3c2599983d32b611649f1cc7a5fcf8de81f1101ee96531e3016e9568a77906"
+    },
+    {
+      "file": "first-message-2.template.md",
+      "offset": 102453857,
+      "length": 1915,
+      "sha256": "c8417e6ed9786fa06abcf3f80cc18f3dae3e6467acf24aaaa5859c030fcab546"
+    },
+    {
+      "file": "grounding-note.txt",
+      "offset": 102449710,
+      "length": 156,
+      "sha256": "5e4a98a8551c40d1441584161ad8f53930dc0c8c959a1dceb16f7f02db239da4"
+    },
+    {
+      "file": "report-first.txt",
+      "offset": 102449922,
+      "length": 329,
+      "sha256": "0777ac37240c123afc83899ae5ff536b3bb8c63d42924107abb8048b324b2e2e"
+    },
+    {
+      "file": "tool-description-prefix.txt",
+      "offset": 102402226,
+      "length": 512,
+      "sha256": "3b6802eb74c807c195061c3f57ac57717860dcff8535f90f2bf88bc0f45a933b"
+    },
+    {
+      "file": "tool-description-suffix.txt",
+      "offset": 102402742,
+      "length": 969,
+      "sha256": "e12c05359467d8439dc176c07b83a5c43479b3591e3a6c004e6411537d2d08a4"
+    }
+  ]
+}

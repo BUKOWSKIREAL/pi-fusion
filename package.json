@@ -1,0 +1,32 @@
+{
+  "name": "pi-local-fusion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Persistent lead/sidekick orchestration for Pi, inspired by Devin Local Fusion",
+  "homepage": "https://github.com/BUKOWSKIREAL/pi-fusion#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/BUKOWSKIREAL/pi-fusion.git" },
+  "bugs": { "url": "https://github.com/BUKOWSKIREAL/pi-fusion/issues" },
+  "type": "module",
+  "keywords": ["pi-package"],
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": { "node": ">=22.19.0" },
+  "pi": { "extensions": ["./src/index.ts"] },
+  "files": ["src", "resources", "scripts", "evaluation", "README.md", "DESIGN.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.3",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "tsx": "^4.20.0"
+  }
+}

@@ -1,0 +1,216 @@
+{
+  "evaluatedAt": "2026-10-05T17:20:56.115Z",
+  "note": "Synthetic smoke sample only; no workflow accuracy or cost-savings claim. Only synthetic requests were sent.",
+  "results": [
+    {
+      "request": "设计一个支持多租户的权限模型，比较 RBAC 和 ABAC 后选择方案。",
+      "expected": "lead",
+      "result": {
+        "recommendation": "lead",
+        "choice": "lead",
+        "confidence": 1,
+        "probabilities": {
+          "lead": 1,
+          "uncertain": 0,
+          "sidekick": 0
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 646,
+          "output_tokens": 43
+        },
+        "latencyMs": 573,
+        "reason": "Judgment or authority remains with lead."
+      }
+    },
+    {
+      "request": "按已经确定的方案，把 auth.ts 的 parseToken 拆到 token.ts，保持签名和行为不变，更新导入，运行 npm test -- token.test.ts，然后返回 diff 和日志。",
+      "expected": "sidekick",
+      "result": {
+        "recommendation": "sidekick",
+        "choice": "sidekick",
+        "confidence": 0.84,
+        "probabilities": {
+          "lead": 0.01,
+          "sidekick": 0.89,
+          "uncertain": 0.1
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 673,
+          "output_tokens": 45
+        },
+        "latencyMs": 575,
+        "reason": "Bounded execution suggested; lead must still supply/review the brief."
+      }
+    },
+    {
+      "request": "帮我查线上数据库，自己写 SQL 算上周活跃用户，解释口径。",
+      "expected": "lead",
+      "result": {
+        "recommendation": "lead",
+        "choice": "lead",
+        "confidence": 0.63,
+        "probabilities": {
+          "sidekick": 0.01,
+          "lead": 0.75,
+          "uncertain": 0.24
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 642,
+          "output_tokens": 43
+        },
+        "latencyMs": 281,
+        "reason": "Judgment or authority remains with lead."
+      }
+    },
+    {
+      "request": "运行我已审定的 queries/weekly-active.sql，不改查询；遇到缺表立即汇报，返回原始结果。",
+      "expected": "sidekick",
+      "result": {
+        "recommendation": "sidekick",
+        "choice": "sidekick",
+        "confidence": 0.96,
+        "probabilities": {
+          "lead": 0.01,
+          "uncertain": 0.02,
+          "sidekick": 0.97
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 649,
+          "output_tokens": 45
+        },
+        "latencyMs": 319,
+        "reason": "Bounded execution suggested; lead must still supply/review the brief."
+      }
+    },
+    {
+      "request": "继续做刚才那个。",
+      "expected": "uncertain",
+      "result": {
+        "recommendation": "lead",
+        "choice": "uncertain",
+        "confidence": 0.99,
+        "probabilities": {
+          "lead": 0,
+          "sidekick": 0,
+          "uncertain": 1
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 622,
+          "output_tokens": 45
+        },
+        "latencyMs": 252,
+        "reason": "Uncertain or below the advisory threshold; lead decides."
+      }
+    },
+    {
+      "request": "审查这个登录修复的完整 diff，判断是否存在鉴权绕过。",
+      "expected": "lead",
+      "result": {
+        "recommendation": "lead",
+        "choice": "lead",
+        "confidence": 0.39,
+        "probabilities": {
+          "uncertain": 0.38,
+          "sidekick": 0.03,
+          "lead": 0.59
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 638,
+          "output_tokens": 43
+        },
+        "latencyMs": 299,
+        "reason": "Judgment or authority remains with lead."
+      }
+    },
+    {
+      "request": "在 src/ 和 tests/ 全量查找旧 API getUserInfo 的引用，给出路径和行号，不修改代码。",
+      "expected": "sidekick",
+      "result": {
+        "recommendation": "sidekick",
+        "choice": "sidekick",
+        "confidence": 0.98,
+        "probabilities": {
+          "lead": 0.01,
+          "uncertain": 0,
+          "sidekick": 0.99
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 651,
+          "output_tokens": 45
+        },
+        "latencyMs": 268,
+        "reason": "Bounded execution suggested; lead must still supply/review the brief."
+      }
+    },
+    {
+      "request": "提交修改并创建 PR，回复 reviewer 的问题。",
+      "expected": "lead",
+      "result": {
+        "recommendation": "lead",
+        "choice": "lead",
+        "confidence": 0.39,
+        "probabilities": {
+          "uncertain": 0.38,
+          "sidekick": 0.03,
+          "lead": 0.59
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 631,
+          "output_tokens": 43
+        },
+        "latencyMs": 267,
+        "reason": "Judgment or authority remains with lead."
+      }
+    },
+    {
+      "request": "运行 pnpm --filter api test -- auth.test.ts 并整理失败日志，不改变测试或实现。",
+      "expected": "sidekick",
+      "result": {
+        "recommendation": "sidekick",
+        "choice": "sidekick",
+        "confidence": 0.96,
+        "probabilities": {
+          "lead": 0.02,
+          "sidekick": 0.97,
+          "uncertain": 0.01
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 644,
+          "output_tokens": 45
+        },
+        "latencyMs": 254,
+        "reason": "Bounded execution suggested; lead must still supply/review the brief."
+      }
+    },
+    {
+      "request": "编写评测评分规则，并决定哪些失败应该扣多少分。",
+      "expected": "lead",
+      "result": {
+        "recommendation": "lead",
+        "choice": "lead",
+        "confidence": 0.97,
+        "probabilities": {
+          "lead": 0.98,
+          "sidekick": 0,
+          "uncertain": 0.02
+        },
+        "model": "jev-1.13.0",
+        "usage": {
+          "input_tokens": 637,
+          "output_tokens": 43
+        },
+        "latencyMs": 252,
+        "reason": "Judgment or authority remains with lead."
+      }
+    }
+  ]
+}
