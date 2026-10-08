@@ -16,9 +16,13 @@ This is an independent extension. It is not affiliated with Cognition or Devin. 
 
 ## Quick start
 
+Pi Fusion is published on npm as [`pi-local-fusion`](https://www.npmjs.com/package/pi-local-fusion). Install the latest release:
+
 ```bash
 pi install npm:pi-local-fusion
 ```
+
+The package includes the `pi-package` keyword for discovery in the [Pi package gallery](https://pi.dev/packages). Gallery listings may take time to update after a release.
 
 To install from GitHub instead:
 
