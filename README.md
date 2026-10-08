@@ -1,5 +1,7 @@
 # Pi Fusion
 
+English | [简体中文](README.zh-CN.md)
+
 Pi Fusion is a [Pi](https://pi.dev) extension that adds a persistent **lead / sidekick** workflow. Your current Pi model stays the **lead**. It makes the decisions, writes briefs, reviews results and talks to you. A second model you have already configured runs as a **sidekick**: one long-lived worker that does bounded implementation and verification work in the same workspace.
 
 The sidekick keeps its own conversation from one handoff to the next. So the lead can send follow-up work without explaining everything again, and it can still review every change before reporting back.
@@ -7,6 +9,14 @@ The sidekick keeps its own conversation from one handoff to the next. So the lea
 Optional **Jev routing advice** can suggest whether a new request should go to the lead or the sidekick. It is advice only. It never changes the main model and never starts a handoff by itself.
 
 This is an independent extension. It is not affiliated with Cognition or Devin. See [License and provenance](#license-and-provenance).
+
+## Demo
+
+Choose a model → hand off work → run in the background → review the result → continue in the same session.
+
+![Pi Fusion workflow: the lead delegates work, the sidekick executes, and the lead reviews the result. Follow-up tasks reuse the same sidekick conversation.](docs/media/workflow-en.gif)
+
+*About 22 seconds, looping. An illustrative workflow, not a live recording.* [Static image](docs/media/workflow-en.png)
 
 ## Requirements
 

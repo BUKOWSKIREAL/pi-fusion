@@ -11,7 +11,7 @@
   "license": "SEE LICENSE IN LICENSE",
   "engines": { "node": ">=22.19.0" },
   "pi": { "extensions": ["./src/index.ts"] },
-  "files": ["src", "resources", "scripts", "evaluation", "docs", "research", "README.md", "DESIGN.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "files": ["src", "resources", "scripts", "evaluation", "docs", "research", "README.md", "README.zh-CN.md", "DESIGN.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "scripts": {
     "check": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts"
