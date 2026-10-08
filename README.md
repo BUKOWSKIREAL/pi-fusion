@@ -14,9 +14,13 @@ This is an independent extension. It is not affiliated with Cognition or Devin. 
 - Pi (tested with Pi 1.0.3)
 - A sidekick provider and model that is already set up in Pi, with working credentials
 
-Pi Fusion is installed from GitHub. It is not published to npm.
-
 ## Quick start
+
+```bash
+pi install npm:pi-local-fusion
+```
+
+To install from GitHub instead:
 
 ```bash
 pi install git:github.com/BUKOWSKIREAL/pi-fusion
