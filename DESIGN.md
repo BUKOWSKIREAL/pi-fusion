@@ -55,3 +55,7 @@ Live references: [TypeSafe API](https://docs.typesafe.ai/api), [Choice](https://
 ## Validation scope
 
 Checked against Pi 1.0.3. Tests use the actual SDK with a scripted offline provider for tool execution, interruption, persistence, background wakes and accounting. Each preference scenario opens an independent AgentSession so default inheritance, branch precedence, one-shot migration and corrupt-file recovery are observed the way a user relaunch behaves. The 10-case Jev smoke evaluation is a real service call using only synthetic inputs. This is not a comparison of task quality or spending against Devin.
+
+## Engineering reconstruction target
+
+[Devin Fusion engineering reconstruction](docs/DEVIN_FUSION_ENGINEERING.md) records the expanded runtime target, source evidence, current gaps and implementation sequence. It separates confirmed Local Fusion mechanisms from the cloud architecture described by Cognition and from unresolved service-side routing policy. The accompanying [evidence index](research/devin-fusion/engineering-evidence.json) pins the inspected build and selected static claims. This specification does not change the currently installed runtime.

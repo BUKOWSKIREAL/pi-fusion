@@ -29,6 +29,8 @@ export interface FusionState {
   version: 1;
   enabled: boolean;
   config: FusionConfig;
+  // Branch-local physical model for the persistent sidekick; never a default.
+  assignment?: { model: string };
   checkpoint?: Checkpoint;
   last?: RunRecord;
   pendingUsage: Usage;
@@ -75,6 +77,12 @@ export function restoreState(data: unknown): FusionState {
     || !Number.isSafeInteger(s.config.timeoutMs) || s.config.timeoutMs < 1000
     || typeof s.config.reminders !== 'boolean' || !['off', 'jev'].includes(s.config.routing)) throw new Error('Invalid saved Fusion configuration.');
   if (s.config.model) parseModel(s.config.model);
+  if (s.assignment !== undefined) {
+    if (!s.assignment || typeof s.assignment !== 'object' || Array.isArray(s.assignment)) throw new Error('Invalid saved Fusion assignment.');
+    if (typeof s.assignment.model !== 'string' || !s.assignment.model) throw new Error('Invalid saved Fusion assignment.');
+    // Whitelist the persisted shape; a future field cannot reach the runtime silently.
+    s.assignment = { model: parseModel(s.assignment.model) };
+  }
   if (s.last?.status === 'running') {
     s.pendingUsage = addUsage(s.pendingUsage, s.last.usage);
     s.last.status = 'cancelled';

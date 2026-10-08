@@ -5,9 +5,10 @@ import {
   SessionManager, SettingsManager,
   type ExtensionContext, type SessionEntry,
 } from '@earendil-works/pi-coding-agent';
-import type { SidekickDriver } from './controller.ts';
-import { addUsage, zeroUsage, type Checkpoint, type FusionConfig } from './state.ts';
+import type { SidekickDriver, MaintenanceResult } from './controller.ts';
+import { addUsage, parseModel, zeroUsage, type Checkpoint, type FusionConfig } from './state.ts';
 import { SIDEKICK_PROMPT, FIRST_HANDOFF, leadUpdate } from './prompts.ts';
+import { sidekickCompaction } from './compaction.ts';
 
 export function sidekickDirectory(agentDir = getAgentDir()) { return resolve(agentDir, 'fusion', 'sessions'); }
 
@@ -74,10 +75,15 @@ export async function createSidekick(options: {
     cacheWarming: 'off',
     steeringMode: 'all',
   });
+  let compactionFailure: string | undefined;
+  let abortForCompaction: (() => void) | undefined;
   const loader = new DefaultResourceLoader({
     cwd: ctx.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
     systemPrompt: SIDEKICK_PROMPT, appendSystemPromptOverride: () => [],
+    // Only the internal compaction adapter runs in the child; no parent factories.
+    extensionFactories: [sidekickCompaction(manager, message => { compactionFailure = message; abortForCompaction?.(); },
+      settings.getRetrySettings())],
   });
   await loader.reload();
   const { session } = await createAgentSession({
@@ -86,6 +92,7 @@ export async function createSidekick(options: {
     tools: config.tools === 'readonly' ? ['read', 'grep', 'find', 'ls'] : ['read', 'grep', 'find', 'ls', 'edit', 'write', 'bash'],
   });
   await session.bindExtensions({ mode: 'json' });
+  abortForCompaction = () => { void session.abort().catch(() => {}); };
   let current: Promise<unknown> | undefined;
   let ready: Promise<void> = Promise.resolve();
   let markReady = () => {};
@@ -93,19 +100,32 @@ export async function createSidekick(options: {
   let activity: ((active: boolean) => void) | undefined;
   let turns = 0;
   let limitHit = false;
+  let compacting = false;
   let safeCheckpoint: Checkpoint | undefined = options.checkpoint;
   const captureCheckpoint = () => {
+    // A lazily created child may name a session file that is not flushed yet.
     const file = manager.getSessionFile();
-    safeCheckpoint = file ? { file, leaf: manager.getLeafId() } : undefined;
+    safeCheckpoint = file && existsSync(file) ? { file, leaf: manager.getLeafId() } : undefined;
   };
   captureCheckpoint();
   let priorIds = new Set<string>();
   const currentUsage = () => usageForEntries(manager.getBranch().filter(entry => !priorIds.has(entry.id)));
+  // The last branch assistant message. Compaction can shorten session.messages, so the
+  // persisted branch is the only reliable source for "the report of this handoff".
+  const newAssistantReport = () => {
+    const last = manager.getBranch().filter((entry): entry is Extract<SessionEntry, { type: 'message' }> =>
+      entry.type === 'message' && !priorIds.has(entry.id) && entry.message.role === 'assistant').at(-1);
+    return last?.message;
+  };
   const unsubscribe = session.subscribe(event => {
     if (event.type === 'agent_start') markReady();
     if (event.type === 'turn_start') activity?.(true);
     if (event.type === 'message_end' && event.message.role === 'assistant') activity?.(false);
     if (event.type === 'tool_execution_start') callback?.(`Running ${event.toolName}`);
+    if (event.type === 'compaction_end' && !event.aborted && event.result) {
+      captureCheckpoint();
+      callback?.('Compacted sidekick context');
+    }
     if (event.type === 'turn_end') {
       captureCheckpoint();
       turns++;
@@ -118,10 +138,12 @@ export async function createSidekick(options: {
   });
   return {
     async run(message, onProgress, onActivity) {
+      if (current || compacting) throw new Error('A sidekick run is already in progress. Wait for it to finish or stop it first.');
       callback = onProgress;
       activity = onActivity;
       turns = 0;
       limitHit = false;
+      compactionFailure = undefined;
       priorIds = new Set(manager.getEntries().map(entry => entry.id));
       const priorMessages = session.messages.length;
       ready = new Promise(resolve => { markReady = resolve; });
@@ -129,11 +151,11 @@ export async function createSidekick(options: {
       current = session.prompt(`${priorMessages === 0 ? FIRST_HANDOFF + '\n' : ''}<lead_handoff>\n${message}\n</lead_handoff>`, { expandPromptTemplates: false, source: 'extension' });
       try { await current; } catch (error) { failure = error; }
       finally { markReady(); current = undefined; callback = undefined; captureCheckpoint(); activity?.(false); activity = undefined; }
-      const last = session.messages.slice(priorMessages).findLast(m => m.role === 'assistant');
+      const last = newAssistantReport();
       const text = last?.role === 'assistant' ? last.content.filter(c => c.type === 'text').map(c => c.text).join('\n') : '';
       const error = last?.role === 'assistant' && (last.stopReason === 'error' || last.stopReason === 'aborted' || last.stopReason === 'length')
         ? last.errorMessage ?? `Sidekick stopped: ${last.stopReason}` : undefined;
-      const issue = failure ? String(failure) : limitHit ? 'Sidekick turn limit reached; incomplete work must be reviewed.' : error;
+      const issue = failure ? String(failure) : compactionFailure ?? (limitHit ? 'Sidekick turn limit reached; incomplete work must be reviewed.' : error);
       const report = [issue, text || 'No final report was produced. Inspect the saved sidekick session.'].filter(Boolean).join('\n');
       return {
         report: report.length > 24_000 ? `${report.slice(0, 24_000)}\n[Report truncated; full output in ${manager.getSessionFile()}]` : report,
@@ -157,6 +179,28 @@ export async function createSidekick(options: {
     usage: currentUsage,
     modelInfo: () => ({ model: `${session.model?.provider}/${session.model?.id}`, thinking: session.thinkingLevel }),
     checkpoint: () => safeCheckpoint,
+    // Branch-local physical model; the configured default is never rewritten.
+    async assignModel(reference: string) {
+      if (current || compacting) throw new Error('Stop the active sidekick before changing its assignment.');
+      const ref = parseModel(reference);
+      const slash = ref.indexOf('/');
+      const next = runtime.getModel(ref.slice(0, slash), ref.slice(slash + 1));
+      if (!next || next.api === 'pi-virtual') throw new Error(`Physical sidekick model unavailable: ${ref}`);
+      await session.setModel(next); // defaults persist=false; auth checked before mutation
+      session.setThinkingLevel(config.thinking);
+      captureCheckpoint();
+    },
+    async compact(): Promise<MaintenanceResult> {
+      if (current || compacting) throw new Error('Stop the active sidekick before compacting its context.');
+      compacting = true;
+      compactionFailure = undefined;
+      const before = new Set(manager.getEntries().map(entry => entry.id));
+      let error: string | undefined;
+      try { await session.compact(); }
+      catch (failure) { error = compactionFailure ?? String(failure); }
+      finally { compacting = false; captureCheckpoint(); }
+      return { usage: usageForEntries(manager.getEntries().filter(entry => !before.has(entry.id))), error };
+    },
     dispose() { unsubscribe(); session.dispose(); },
   };
 }

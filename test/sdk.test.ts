@@ -10,26 +10,33 @@ import {
 import { createAgentSession, DefaultResourceLoader, ModelRegistry, ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import fusion from '../src/index.ts';
 import { createSidekick, openSidekick, sidekickDirectory } from '../src/sidekick.ts';
+import { type MaintenanceResult, type SidekickDriver } from '../src/controller.ts';
 import { DEFAULT_CONFIG, freshState, zeroUsage, type FusionState } from '../src/state.ts';
 import { preferencesPath, readPreferences, writePreferences } from '../src/preferences.ts';
 
-type Answer = { text?: string; tool?: { name: string; arguments: JsonObject }; error?: string };
-async function harness(respond: (context: Context, options?: SimpleStreamOptions) => Promise<Answer> | Answer) {
+type Answer = { text?: string; tool?: { name: string; arguments: JsonObject }; error?: string; usageInput?: number };
+async function harness(respond: (context: Context, options?: SimpleStreamOptions, modelId?: string) => Promise<Answer> | Answer,
+  limits: { contextWindow?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pi-fusion-sdk-'));
   const runtime = await ModelRuntime.create({ modelsPath: null, authPath: join(dir, 'auth.json'), refreshOnCreate: false });
   let requests = 0;
+  const physical = [
+    { id: 'worker', name: 'Test worker', reasoning: false },
+    { id: 'worker-strong', name: 'Test worker strong', reasoning: false },
+  ];
   runtime.registerProvider('fusion-test', {
     baseUrl: 'http://unused.invalid', api: 'openai-completions', apiKey: 'offline-test-placeholder',
-    models: [{ id: 'worker', name: 'Test worker', reasoning: false, input: ['text'],
-      cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 4096 }],
+    models: physical.map(({ id, name, reasoning }) => ({ id, name, reasoning, input: ['text'],
+      cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: limits.contextWindow ?? 128000, maxTokens: 4096 })),
     streamSimple(model, context, options) {
       const stream = createAssistantMessageEventStream();
       requests++;
       void (async () => {
-        const answer = await respond(context, options);
+        const answer = await respond(context, options, model.id);
+        const input = answer.usageInput ?? 12;
         const message: AssistantMessage = {
           role: 'assistant', provider: model.provider, model: model.id, api: model.api, timestamp: Date.now(),
-          content: [], usage: { ...zeroUsage(), input: 12, output: 3, totalTokens: 15,
+          content: [], usage: { ...zeroUsage(), input, output: 3, totalTokens: input + 3,
             cost: { input: .000012, output: .000006, cacheRead: 0, cacheWrite: 0, total: .000018 } },
           stopReason: 'pending',
         };
@@ -491,6 +498,582 @@ test('a corrupt defaults file leaves Fusion usable and repairs on model selectio
     assert.equal(current.enabled, true);
     assert.ok(second.getActiveToolNames().includes('sidekick'));
     assert.equal(process.env.TYPESAFE_API_KEY, undefined);
+    assert.equal(h.requests(), 0);
+  } finally { await closeLaunches(launches); restore(); h.cleanup(); }
+});
+
+// ---------------------------------------------------------------------------
+// Runtime slice: branch-local assignment and Pi scheduled compaction.
+// ---------------------------------------------------------------------------
+
+type RuntimeHarness = Awaited<ReturnType<typeof harness>>;
+// A concrete driver: the optional maintenance members exist on the real child driver.
+type RuntimeDriver = SidekickDriver & {
+  assignModel(model: string): Promise<void>;
+  compact(): Promise<MaintenanceResult>;
+  modelInfo(): { model: string; thinking: string };
+};
+function inspect(h: RuntimeHarness, checkpoint: { file: string }) {
+  return SessionManager.open(checkpoint.file, sidekickDirectory(h.dir));
+}
+// Providers see the folded system prompt as the leading message, not Context.systemPrompt.
+const isSummaryRequest = (context: Context) => allText(context).includes('context summarization assistant');
+// Raw message text, for exact multiline comparisons that JSON escaping would break.
+const providerText = (context: Context) => context.messages.flatMap(message => typeof message.content === 'string'
+  ? [message.content] : message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n');
+const compactionEntries = (manager: SessionManager) => manager.getBranch().filter(entry => entry.type === 'compaction');
+const readonlyCompaction = { enabled: false, reserveTokens: 4096, keepRecentTokens: 1 } as const;
+
+test('assigning a physical model keeps the persistent child and restores to its file', async () => {
+  const contexts: Context[] = [];
+  const h = await harness((context, _options, modelId): Answer => {
+    contexts.push(structuredClone(context));
+    return contexts.filter(c => !isSummaryRequest(c)).length === 1
+      ? { tool: { name: 'write', arguments: { path: 'keep.txt', content: 'ALPHA_EXACT' } } }
+      : { text: `handled by ${modelId}`, usageInput: 12 };
+  });
+  const driver = (await createSidekick(h.options)) as RuntimeDriver;
+  try {
+    await driver.run('Remember ALPHA_EXACT and write keep.txt.', () => {});
+    assert.equal(driver.modelInfo().model, 'fusion-test/worker');
+    const checkpoint = driver.checkpoint()!;
+    assert.ok(checkpoint.leaf);
+    const file = checkpoint.file;
+
+    await driver.assignModel('fusion-test/worker-strong');
+    assert.equal(driver.modelInfo().model, 'fusion-test/worker-strong');
+    assert.equal(driver.modelInfo().thinking, 'off', 'the fixture model has reasoning:false');
+    assert.equal(driver.checkpoint()!.file, file, 'the persistent child file is unchanged');
+    assert.ok(inspect(h, { file }).getBranch().some(entry => entry.type === 'model_change' && entry.modelId === 'worker-strong'));
+
+    const second = await driver.run('Continue with ALPHA.', () => {});
+    assert.equal(second.failed, false);
+    assert.equal(second.report, 'handled by worker-strong');
+    assert.match(allText(contexts.at(-1)!), /ALPHA_EXACT/);
+    assert.match(allText(contexts.at(-1)!), /keep\.txt/);
+
+    await assert.rejects(() => driver.assignModel('bogus'), /provider\/model-id/);
+    await assert.rejects(() => driver.assignModel('fusion-test/missing'), /Physical sidekick model unavailable/);
+    assert.equal(driver.modelInfo().model, 'fusion-test/worker-strong');
+    assert.equal(driver.checkpoint()!.file, file);
+
+    const busy = driver.run('Continue again.', () => {});
+    await assert.rejects(() => driver.assignModel('fusion-test/worker'), /Stop the active sidekick before changing its assignment/);
+    assert.equal(driver.modelInfo().model, 'fusion-test/worker-strong');
+    await busy;
+    assert.equal(second.usage.totalTokens, 15);
+
+    // The pre-assignment checkpoint excludes the later branch and its model change.
+    const earlier = (await createSidekick({ ...h.options, checkpoint })) as RuntimeDriver;
+    try {
+      assert.equal(earlier.modelInfo().model, 'fusion-test/worker');
+      assert.notEqual(earlier.checkpoint()!.file, file, 'a restored child is branched into a new file');
+      assert.ok(!inspect(h, earlier.checkpoint()!).getBranch().some(entry => entry.type === 'model_change' && entry.modelId === 'worker-strong'));
+      const third = await earlier.run('Resume after restore.', () => {});
+      assert.equal(third.failed, false);
+      assert.equal(third.report, 'handled by worker');
+      assert.doesNotMatch(allText(contexts.at(-1)!), /worker-strong/);
+    } finally { earlier.dispose(); }
+  } finally { driver.dispose(); h.cleanup(); }
+});
+
+test('compacting before any handoff keeps the checkpoint empty and the child usable', async () => {
+  const h = await harness((context): Answer => isSummaryRequest(context) ? { text: 'offline summary' } : { text: 'later report' });
+  const driver = (await createSidekick({ ...h.options,
+    settings: { retry: { enabled: false }, compaction: readonlyCompaction } })) as RuntimeDriver;
+  try {
+    const empty = await driver.compact();
+    assert.match(empty.error!, /Nothing to compact/);
+    assert.equal(empty.usage.totalTokens, 0);
+    assert.equal(h.requests(), 0, 'no summary request is made when there is nothing to compact');
+    assert.equal(driver.checkpoint(), undefined, 'a file that was never flushed is not persisted');
+    const run = await driver.run('Do the work.', () => {});
+    assert.equal(run.failed, false);
+    assert.equal(run.report, 'later report');
+    assert.ok(driver.checkpoint()!.leaf);
+  } finally { driver.dispose(); h.cleanup(); }
+});
+
+test('manual compaction pins the original handoff once and bills its summary once', async () => {
+  const contexts: Context[] = [];
+  let ordinary = 0;
+  let summaries = 0;
+  const h = await harness((context): Answer => {
+    contexts.push(structuredClone(context));
+    if (isSummaryRequest(context)) { summaries++; return { text: 'offline summary' }; }
+    if (++ordinary === 1) return { tool: { name: 'write', arguments: { path: 'persisted.txt', content: 'ALPHA' } } };
+    return { text: ordinary === 3 ? 'second report' : ordinary === 4 ? 'third report' : 'first report' };
+  });
+  const driver = (await createSidekick({ ...h.options,
+    settings: { retry: { enabled: false }, compaction: readonlyCompaction } })) as RuntimeDriver;
+  try {
+    const brief = 'Brief: add CSV export.\n\n```sql\nselect 1;\n```\nPreserve ALPHA punctuation.';
+    const first = await driver.run(brief, () => {});
+    assert.equal(first.failed, false);
+    assert.equal(first.report, 'first report');
+    assert.equal(first.usage.totalTokens, 30, 'both turns of the run are counted');
+    const file = driver.checkpoint()!.file;
+    const originalCheckpoint = driver.checkpoint()!;
+
+    const compacted = await driver.compact();
+    assert.equal(compacted.error, undefined);
+    const firstSummaries = summaries;
+    assert.ok(firstSummaries >= 1, 'the summary is requested at least once (a split turn uses two)');
+    assert.equal(compacted.usage.totalTokens, 15 * firstSummaries, 'every summary request is ledgered');
+    const branch = inspect(h, { file });
+    assert.equal(compactionEntries(branch).length, 1);
+    assert.equal(branch.getBranch().filter(e => e.type === 'usage').length, firstSummaries);
+    assert.equal(readFileSync(join(h.dir, 'persisted.txt'), 'utf8'), 'ALPHA');
+
+    const second = await driver.run('BRIEF_TWO: check the diff.', () => {});
+    assert.equal(second.failed, false);
+    assert.equal(second.report, 'second report');
+    assert.equal(second.usage.totalTokens, 15);
+    const after = providerText(contexts.at(-1)!);
+    assert.equal(after.split(brief).length - 1, 1, 'the original handoff text appears exactly once');
+    assert.match(after, /offline summary/);
+    assert.match(after, /select 1;/);
+
+    const again = await driver.compact();
+    assert.equal(again.error, undefined);
+    assert.equal(again.usage.totalTokens, 15 * (summaries - firstSummaries), 'the second compaction bills its own summaries');
+    const third = await driver.run('BRIEF_THREE: finish.', () => {});
+    assert.equal(third.failed, false);
+    assert.equal(third.report, 'third report');
+    const latest = providerText(contexts.at(-1)!);
+    assert.equal(latest.split(brief).length - 1, 1, 'a second compaction keeps exactly one copy');
+    assert.equal(driver.checkpoint()!.file, file);
+    assert.equal(compactionEntries(inspect(h, { file })).length, 2);
+    assert.equal(first.usage.totalTokens + second.usage.totalTokens + third.usage.totalTokens
+      + compacted.usage.totalTokens + again.usage.totalTokens, h.requests() * 15, 'no double charge');
+
+    // The branch before any compaction excludes the later briefs and their summaries.
+    const details = inspect(h, { file }).getBranch().filter(e => e.type === 'compaction').at(-1)!;
+    const compactionDetails = details.details as { modifiedFiles: string[]; fusion: { version: number; handoffEntryIds: string[] } };
+    assert.equal(compactionDetails.fusion.version, 1);
+    assert.ok(compactionDetails.modifiedFiles.some(path => path.endsWith('persisted.txt')), 'compaction records the edited file');
+    assert.ok(compactionDetails.fusion.handoffEntryIds.length >= 1, 'the pinned handoff entry is recorded');
+    for (const entry of inspect(h, { file }).getBranch().filter(e => e.type === 'compaction')) {
+      assert.equal(entry.usage, undefined, 'the ledger, not the entry, bills the summary');
+    }
+    const replayed = (await createSidekick({ ...h.options, checkpoint: originalCheckpoint })) as RuntimeDriver;
+    try {
+      const replay = await replayed.run('BRIEF_FOUR: verify.', () => {});
+      assert.equal(replay.failed, false);
+      const replayContext = allText(contexts.at(-1)!);
+      assert.match(replayContext, /Brief: add CSV export/);
+      assert.doesNotMatch(replayContext, /BRIEF_TWO/);
+      assert.doesNotMatch(replayContext, /BRIEF_THREE/);
+    } finally { replayed.dispose(); }
+  } finally { driver.dispose(); h.cleanup(); }
+});
+
+
+test('a failing summary attempt keeps the original context and is billed once', { timeout: 5000 }, async () => {
+  const contexts: Context[] = [];
+  const h = await harness((context): Answer => {
+    contexts.push(structuredClone(context));
+    if (isSummaryRequest(context)) return { error: 'summary fixture failure' };
+    return { text: 'succeeding report' };
+  });
+  const driver = (await createSidekick({ ...h.options,
+    settings: { retry: { enabled: false }, compaction: readonlyCompaction } })) as RuntimeDriver;
+  try {
+    const brief = 'Brief: keep this exact text.\nSecond line.';
+    const first = await driver.run(brief, () => {});
+    assert.equal(first.failed, false);
+    const ledger = () => inspect(h, { file: driver.checkpoint()!.file }).getBranch().filter(e => e.type === 'usage').length;
+    const before = ledger();
+    const compacted = await driver.compact();
+    assert.match(compacted.error!, /summary fixture failure/);
+    assert.equal(compacted.usage.totalTokens, 15, 'the failed attempt still reports its usage');
+    assert.equal(ledger(), before + 1, 'exactly one ledger entry for the failed attempt');
+    assert.equal(compactionEntries(inspect(h, { file: driver.checkpoint()!.file })).length, 0, 'no compaction is applied');
+    const second = await driver.run('Follow-up brief.', () => {});
+    assert.equal(second.failed, false);
+    const after = providerText(contexts.at(-1)!);
+    assert.match(after, /keep this exact text/);
+    assert.doesNotMatch(after, /offline summary/);
+  } finally { driver.dispose(); h.cleanup(); }
+});
+
+test('cancelling a summary attempt settles without deadlock and keeps the child usable', { timeout: 5000 }, async () => {
+  let begun = () => {}; const started = new Promise<void>(r => { begun = r; });
+  let release = () => {}; const gate = new Promise<void>(r => { release = r; });
+  const h = await harness(async (context, options): Promise<Answer> => {
+    if (isSummaryRequest(context)) {
+      begun();
+      await Promise.race([gate, new Promise<void>(resolve => options!.signal!.addEventListener('abort', () => resolve(), { once: true }))]);
+      return { error: 'aborted summary' };
+    }
+    return { text: 'after cancellation' };
+  });
+  const driver = (await createSidekick({ ...h.options,
+    settings: { retry: { enabled: false }, compaction: readonlyCompaction } })) as RuntimeDriver;
+  try {
+    await driver.run('Brief before cancellation.', () => {});
+    const compacting = driver.compact();
+    await started;
+    await driver.abort();
+    const compacted = await compacting;
+    assert.ok(compacted.error !== undefined, 'the cancelled attempt reports an error');
+    assert.equal(compacted.usage.totalTokens, 15, 'reported cancelled-summary usage is preserved');
+    assert.equal(compactionEntries(inspect(h, { file: driver.checkpoint()!.file })).length, 0, 'no compaction is applied');
+    const run = await driver.run('Brief after cancellation.', () => {});
+    assert.equal(run.failed, false);
+    assert.equal(run.report, 'after cancellation');
+  } finally { release(); driver.dispose(); h.cleanup(); }
+});
+
+test('automatic threshold compaction pins the handoff and keeps the report accurate', { timeout: 8000 }, async () => {
+  const contexts: Context[] = [];
+  const h = await harness((context): Answer => {
+    contexts.push(structuredClone(context));
+    if (isSummaryRequest(context)) return { text: 'offline summary' };
+    return contexts.filter(c => !isSummaryRequest(c)).length === 1
+      ? { tool: { name: 'ls', arguments: { path: '.' } }, usageInput: 125_000 }
+      : { text: 'fresh final report' };
+  });
+  const driver = (await createSidekick({ ...h.options,
+    settings: { retry: { enabled: false }, compaction: { enabled: true, reserveTokens: 4096, keepRecentTokens: 1 } } })) as RuntimeDriver;
+  try {
+    const run = await driver.run('AUTO_HANDOFF_EXACT: list the directory.', () => {});
+    assert.equal(run.failed, false);
+    assert.equal(run.report, 'fresh final report', 'the report is the newest response, not a pre-compaction one');
+    assert.match(providerText(contexts.at(-1)!), /AUTO_HANDOFF_EXACT/);
+    assert.equal(run.usage.totalTokens, 125_003 + 15 * (h.requests() - 1),
+      'every work and summary request is billed before the handoff settles');
+    const branch = inspect(h, { file: driver.checkpoint()!.file });
+    assert.equal(compactionEntries(branch).length, 1, 'the threshold compaction was applied');
+    assert.ok(branch.getBranch().filter(e => e.type === 'usage').length >= 1, 'the summary is ledgered');
+    assert.equal(h.requests(), 3, 'two work turns and one summary request');
+  } finally { driver.dispose(); h.cleanup(); }
+});
+
+test('compaction stops instead of dropping the handoff when the pinned text cannot fit', { timeout: 8000 }, async () => {
+  const contexts: Context[] = [];
+  const h = await harness((context): Answer => {
+    contexts.push(structuredClone(context));
+    if (isSummaryRequest(context)) return { text: 'offline summary' };
+    return { text: 'ordinary report' };
+  }, { contextWindow: 5_000 });
+  const driver = (await createSidekick({ ...h.options,
+    settings: { retry: { enabled: false }, compaction: { enabled: false, reserveTokens: 4096, keepRecentTokens: 1 } } })) as RuntimeDriver;
+  try {
+    const brief = 'Brief that must be preserved.';
+    await driver.run(brief, () => {});
+    const compacted = await driver.compact();
+    assert.match(compacted.error!, /Compacted context with pinned handoffs exceeds/);
+    assert.equal(compacted.usage.totalTokens, 15, 'the full-context guard includes the system prompt after summarizing');
+    assert.equal(h.requests(), 2, 'one work request and one summary request');
+    assert.equal(compactionEntries(inspect(h, { file: driver.checkpoint()!.file })).length, 0, 'no compaction is applied');
+    const run = await driver.run('Follow-up.', () => {});
+    assert.equal(run.failed, false);
+    assert.match(providerText(contexts.at(-1)!), /Brief that must be preserved/);
+  } finally { driver.dispose(); h.cleanup(); }
+});
+
+test('delivered steering survives compaction while an aborted queued update does not', { timeout: 5000 }, async () => {
+  let release = () => {};
+  let entered = () => {};
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const contexts: Context[] = [];
+  let blockNext = true;
+  const h = await harness(async (context, options): Promise<Answer> => {
+    if (isSummaryRequest(context)) return { text: 'offline summary' };
+    contexts.push(structuredClone(context));
+    if (blockNext) {
+      blockNext = false;
+      entered();
+      await Promise.race([gate, new Promise<void>(resolve => {
+        if (options?.signal?.aborted) resolve();
+        else options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+      })]);
+    }
+    return { text: 'steering report' };
+  });
+  const driver = await createSidekick({ ...h.options,
+    settings: { retry: { enabled: false }, compaction: readonlyCompaction } }) as RuntimeDriver;
+  try {
+    const run = driver.run('First brief.', () => {});
+    await started;
+    const update = 'NEW_REQUIREMENT\nKeep `price >= 0` exactly.';
+    assert.equal(await driver.steer(update), true);
+    release();
+    assert.equal((await run).failed, false);
+    assert.equal((await driver.compact()).error, undefined);
+    assert.equal((await driver.run('Review the result.', () => {})).failed, false);
+    assert.equal(providerText(contexts.at(-1)!).split(update).length - 1, 1);
+  } finally { release(); driver.dispose(); h.cleanup(); }
+
+  let begun = () => {};
+  const pending = new Promise<void>(resolve => { begun = resolve; });
+  let first = true;
+  let lastContext: Context | undefined;
+  const cancelled = await harness(async (context, options): Promise<Answer> => {
+    if (isSummaryRequest(context)) return { text: 'offline summary' };
+    lastContext = structuredClone(context);
+    if (first) {
+      first = false; begun();
+      await new Promise<void>(resolve => options!.signal!.addEventListener('abort', () => resolve(), { once: true }));
+    }
+    return { text: 'after abort' };
+  });
+  const child = await createSidekick({ ...cancelled.options,
+    settings: { retry: { enabled: false }, compaction: readonlyCompaction } }) as RuntimeDriver;
+  try {
+    const run = child.run('Original delivered brief.', () => {});
+    await pending;
+    await child.steer('NEVER_DELIVERED_UPDATE');
+    await child.abort();
+    await run;
+    await child.run('Resume.', () => {});
+    assert.equal((await child.compact()).error, undefined);
+    await child.run('Inspect preserved context.', () => {});
+    assert.doesNotMatch(providerText(lastContext!), /NEVER_DELIVERED_UPDATE/);
+  } finally { await child.abort(); child.dispose(); cancelled.cleanup(); }
+});
+
+test('assignment and compact commands preserve defaults, restore branches, and claim summary usage once', { timeout: 8000 }, async () => {
+  let action: 'delegate' | 'read' | undefined;
+  const childModels: string[] = [];
+  const h = await harness((context, _options, modelId): Answer => {
+    if (isSummaryRequest(context)) return { text: 'offline summary' };
+    if (!getCurrentTools(context.messages).some(tool => tool.name === 'sidekick')) {
+      childModels.push(modelId!);
+      return { text: 'child report' };
+    }
+    const next = action; action = undefined;
+    if (next === 'delegate') return { tool: { name: 'sidekick', arguments: { message: 'COMMAND_BRIEF', block: true } } };
+    if (next === 'read') return { tool: { name: 'read_sidekick', arguments: { block: false } } };
+    return { text: 'reviewed' };
+  });
+  const restore = isolate(h);
+  const launches: Launch[] = [];
+  const open = async (manager = SessionManager.inMemory(h.dir)) => {
+    const settings = SettingsManager.inMemory({ retry: { enabled: false }, compaction: readonlyCompaction });
+    const loader = new DefaultResourceLoader({ cwd: h.dir, agentDir: h.dir, settingsManager: settings,
+      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, extensionFactories: [fusion] });
+    await loader.reload();
+    const { session } = await createAgentSession({ cwd: h.dir, agentDir: h.dir, modelRuntime: h.runtime,
+      model: h.runtime.getModel('fusion-test', 'worker'), resourceLoader: loader, sessionManager: manager, settingsManager: settings });
+    await session.bindExtensions({ mode: 'json' });
+    launches.push({ session, manager });
+    return { session, manager };
+  };
+  try {
+    const first = await open();
+    await first.session.prompt('/fusion model fusion-test/worker');
+    const defaults = readFileSync(preferencesPath(h.dir), 'utf8');
+    await first.session.prompt('/fusion assign fusion-test/worker-strong');
+    assert.deepEqual(fusionState(first.manager)!.assignment, { model: 'fusion-test/worker-strong' });
+    assert.equal(readFileSync(preferencesPath(h.dir), 'utf8'), defaults);
+    action = 'delegate';
+    await first.session.prompt('Run the brief.');
+    assert.deepEqual(childModels, ['worker-strong']);
+    const file = fusionState(first.manager)!.checkpoint!.file;
+    const before = h.requests();
+    await first.session.prompt('/fusion compact');
+    const charged = (h.requests() - before) * 15;
+    assert.ok(charged > 0);
+    assert.equal(fusionState(first.manager)!.pendingUsage.totalTokens, charged);
+    assert.equal(fusionState(first.manager)!.checkpoint!.file, file);
+    action = 'read'; await first.session.prompt('Read the report.');
+    const lastToolUsage = () => first.session.messages.filter(message => message.role === 'toolResult').at(-1)!.usage!.totalTokens;
+    assert.equal(lastToolUsage(), charged);
+    action = 'read'; await first.session.prompt('Read once more.');
+    assert.equal(lastToolUsage(), 0);
+    assert.equal(readFileSync(preferencesPath(h.dir), 'utf8'), defaults);
+    const saved = first.manager;
+    await closeLaunches(launches);
+    const resumed = await open(saved);
+    assert.deepEqual(fusionState(saved)!.assignment, { model: 'fusion-test/worker-strong' });
+    const fresh = await open();
+    assert.equal(fusionState(fresh.manager)!.assignment, undefined);
+    assert.equal(fusionState(fresh.manager)!.config.model, 'fusion-test/worker');
+    const requests = h.requests();
+    await resumed.session.prompt('/fusion model fusion-test/worker-strong');
+    assert.equal(readPreferences(h.dir)!.config.model, 'fusion-test/worker-strong');
+    assert.equal(fusionState(saved)!.assignment, undefined);
+    await resumed.session.prompt('/fusion assign fusion-test/worker');
+    await resumed.session.prompt('/fusion reset');
+    assert.equal(fusionState(saved)!.assignment, undefined);
+    assert.equal(fusionState(saved)!.checkpoint, undefined);
+    assert.equal(readPreferences(h.dir)!.config.model, 'fusion-test/worker-strong');
+    assert.equal((JSON.parse(readFileSync(preferencesPath(h.dir), 'utf8')) as Record<string, unknown>).assignment, undefined);
+    assert.equal(h.requests(), requests, 'configuration commands make no model requests');
+  } finally { await closeLaunches(launches); restore(); h.cleanup(); }
+});
+
+// ---------------------------------------------------------------------------
+// Simplified settings flow: /fusion opens the picker first, then a short menu.
+// ---------------------------------------------------------------------------
+
+type SelectCall = { title: string; options: string[] };
+function scriptedUI(session: Awaited<ReturnType<typeof createAgentSession>>['session'], script: (string | undefined)[]) {
+  const selects: SelectCall[] = [];
+  const notices: string[] = [];
+  const base = session.extensionRunner.createContext().ui;
+  const ui = {
+    ...base,
+    select: async (title: string, options: string[]) => {
+      selects.push({ title, options: [...options] });
+      assert.ok(script.length > 0, 'unexpected extra dialog');
+      return script.shift();
+    },
+    notify: (message: string, type?: string) => { notices.push(`${type ?? 'info'}:${message}`); },
+  };
+  session.extensionRunner.setUIContext(ui, 'rpc');
+  return { selects, notices };
+}
+
+test('first /fusion opens the picker directly, then the short settings menu', { timeout: 15000 }, async () => {
+  const h = await harness((): Answer => ({ text: 'unused' }));
+  const restore = isolate(h);
+  const launches: Launch[] = [];
+  try {
+    const open = async () => {
+      const loader = new DefaultResourceLoader({ cwd: h.dir, agentDir: h.dir, noExtensions: true, noSkills: true,
+        noPromptTemplates: true, noThemes: true, extensionFactories: [fusion] });
+      await loader.reload();
+      const { session } = await createAgentSession({ cwd: h.dir, agentDir: h.dir, modelRuntime: h.runtime,
+        model: h.runtime.getModel('fusion-test', 'worker'), resourceLoader: loader,
+        sessionManager: SessionManager.inMemory(h.dir), settingsManager: SettingsManager.inMemory({ retry: { enabled: false } }) });
+      await session.bindExtensions({ mode: 'json' });
+      launches.push({ session, manager: session.sessionManager });
+      return session;
+    };
+    const first = await open();
+    const ui = scriptedUI(first, ['fusion-test/worker']);
+    await first.prompt('/fusion');
+    assert.equal(ui.selects.length, 1, 'the first /fusion goes straight to the picker');
+    assert.match(ui.selects[0]!.title, /Choose sidekick model/);
+    assert.deepEqual(ui.selects[0]!.options.sort(), ['fusion-test/worker', 'fusion-test/worker-strong']);
+    const defaults = readPreferences(h.dir)!;
+    assert.equal(defaults.enabled, true);
+    assert.equal(defaults.config.model, 'fusion-test/worker');
+    assert.ok(first.getActiveToolNames().includes('sidekick'));
+    assert.match(ui.notices.at(-1)!, /Fusion on/);
+    assert.match(ui.notices.at(-1)!, /Sidekick: fusion-test\/worker/);
+
+    // The settings view shows the model and a toggle, not the advanced commands.
+    const settings = scriptedUI(first, [undefined]);
+    await first.prompt('/fusion');
+    assert.equal(settings.selects.length, 1);
+    const menu = settings.selects[0]!;
+    assert.match(menu.title, /Fusion · On/);
+    assert.deepEqual(menu.options, ['Sidekick model: fusion-test/worker', 'Turn off', 'View details']);
+    const bytes = readFileSync(preferencesPath(h.dir));
+
+    // Turning off and on again needs no picker.
+    const off = scriptedUI(first, ['Turn off']);
+    await first.prompt('/fusion');
+    assert.equal(off.selects.length, 1, 'no picker is opened for the toggle');
+    assert.equal(readPreferences(h.dir)!.enabled, false);
+    assert.match(off.notices.at(-1)!, /Fusion off/);
+    const offBytes = readFileSync(preferencesPath(h.dir));
+
+    const on = scriptedUI(first, ['Turn on']);
+    await first.prompt('/fusion');
+    assert.equal(on.selects.length, 1);
+    assert.equal(readPreferences(h.dir)!.enabled, true);
+    assert.match(on.notices.at(-1)!, /Fusion on/);
+    assert.notDeepEqual(readFileSync(preferencesPath(h.dir)), offBytes);
+    assert.ok(first.getActiveToolNames().includes('sidekick'));
+
+    // Escaping the picker keeps the saved defaults byte-for-byte.
+    const escape = scriptedUI(first, [undefined]);
+    await first.prompt('/fusion-model');
+    assert.equal(escape.selects.length, 1, '/fusion-model opens the picker');
+    assert.deepEqual(readFileSync(preferencesPath(h.dir)), bytes, 'escaping the picker changes nothing');
+    assert.equal(readPreferences(h.dir)!.config.model, 'fusion-test/worker');
+
+    // /fusion model with no identifier opens the same picker.
+    const explicit = scriptedUI(first, [undefined]);
+    await first.prompt('/fusion model');
+    assert.equal(explicit.selects.length, 1, '/fusion model with no argument opens the picker');
+    assert.match(explicit.selects[0]!.title, /Choose sidekick model/);
+    assert.deepEqual(readFileSync(preferencesPath(h.dir)), bytes, 'escaping changes nothing');
+    assert.equal(h.requests(), 0);
+  } finally { await closeLaunches(launches); restore(); h.cleanup(); }
+});
+
+test('settings flow recovers when no model is available and lists advanced commands', { timeout: 15000 }, async () => {
+  const h = await harness((): Answer => ({ text: 'unused' }));
+  const restore = isolate(h);
+  const launches: Launch[] = [];
+  try {
+    const open = async () => {
+      const loader = new DefaultResourceLoader({ cwd: h.dir, agentDir: h.dir, noExtensions: true, noSkills: true,
+        noPromptTemplates: true, noThemes: true, extensionFactories: [fusion] });
+      await loader.reload();
+      const { session } = await createAgentSession({ cwd: h.dir, agentDir: h.dir, modelRuntime: h.runtime,
+        model: h.runtime.getModel('fusion-test', 'worker'), resourceLoader: loader,
+        sessionManager: SessionManager.inMemory(h.dir), settingsManager: SettingsManager.inMemory({ retry: { enabled: false } }) });
+      await session.bindExtensions({ mode: 'json' });
+      launches.push({ session, manager: session.sessionManager });
+      return session;
+    };
+    const session = await open();
+    // A virtual candidate must never be offered as a sidekick.
+    const registry = session.extensionRunner.createContext().modelRegistry;
+    const getAvailable = registry.getAvailable;
+    const original = getAvailable.call(registry);
+    const virtual = { ...original[0]!, api: 'pi-virtual' as const, id: 'router', name: 'Virtual router' };
+    registry.getAvailable = () => [...original, virtual as never];
+    const ui = scriptedUI(session, ['fusion-test/worker']);
+    await session.prompt('/fusion-model');
+    assert.deepEqual(ui.selects[0]!.options.sort(), ['fusion-test/worker', 'fusion-test/worker-strong']);
+    registry.getAvailable = getAvailable;
+
+    // Empty model list: a friendly warning, no picker and no state change.
+    const empty = scriptedUI(session, [undefined]);
+    registry.getAvailable = () => [];
+    await session.prompt('/fusion-model');
+    assert.equal(empty.selects.length, 0);
+    assert.match(empty.notices.at(-1)!, /No sidekick models are available/);
+    registry.getAvailable = getAvailable;
+    assert.equal(readPreferences(h.dir)!.enabled, true);
+
+    // /fusion on with no saved default opens the picker instead of erroring.
+    rmSync(preferencesPath(h.dir), { force: true });
+    const fresh = await open();
+    const picker = scriptedUI(fresh, [undefined]);
+    await fresh.prompt('/fusion on');
+    assert.equal(picker.selects.length, 1, 'a missing model opens the picker');
+    assert.equal(readPreferences(h.dir), undefined, 'escaping the picker writes nothing');
+    const chosen = scriptedUI(fresh, ['fusion-test/worker-strong']);
+    await fresh.prompt('/fusion on');
+    assert.equal(chosen.selects.length, 1);
+    assert.equal(readPreferences(h.dir)!.enabled, true);
+    assert.equal(readPreferences(h.dir)!.config.model, 'fusion-test/worker-strong');
+    assert.ok(fresh.getActiveToolNames().includes('sidekick'));
+
+    // Unknown subcommands give one short recovery line; help lists the advanced set.
+    const unknown = scriptedUI(session, [undefined]);
+    await session.prompt('/fusion nonsense');
+    assert.match(unknown.notices.at(-1)!, /Unknown Fusion command/);
+    const help = scriptedUI(session, [undefined]);
+    await session.prompt('/fusion help');
+    const text = help.notices.at(-1)!;
+    assert.match(text, /\/fusion assign provider\/model-id/);
+    assert.match(text, /\/fusion compact/);
+    assert.match(text, /Advanced \(optional\)/);
+
+    // Without a UI, /fusion prints a short summary rather than a usage wall.
+    session.extensionRunner.setUIContext(undefined, 'json');
+    const noUI = session.extensionRunner.getUIContext();
+    const notify = noUI.notify;
+    const notifications: string[] = [];
+    noUI.notify = message => { notifications.push(message); };
+    try {
+      assert.equal(session.extensionRunner.hasUI(), false);
+      await session.prompt('/fusion');
+      assert.match(notifications.at(-1)!, /Fusion on/);
+      assert.match(notifications.at(-1)!, /Use \/fusion help/);
+      assert.doesNotMatch(notifications.at(-1)!, /Advanced|on\|off|assign provider/);
+    } finally { noUI.notify = notify; }
     assert.equal(h.requests(), 0);
   } finally { await closeLaunches(launches); restore(); h.cleanup(); }
 });

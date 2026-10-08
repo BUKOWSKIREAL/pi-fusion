@@ -31,20 +31,22 @@ Then, in Pi:
 /fusion
 ```
 
-`/fusion` opens a menu where you can pick a sidekick model. You can also set the model directly:
+The first time, `/fusion` goes straight to the model picker: choose one of the models Pi already has credentials for and Fusion turns on. The choice is saved as your default, so later Pi launches start with that sidekick. The lead model does not change, and Pi's own `/model` still controls it.
 
-```text
-/fusion model provider/model-id
-```
+After that, `/fusion` opens a short settings view — the current sidekick, an on/off toggle, and details. `/fusion-model` is a shortcut that opens the same picker again. Virtual model routers are not offered, because the sidekick needs one real model.
 
-`provider/model-id` is a placeholder. Replace it with an exact identifier that appears in Pi's `/model` list. Choosing a model turns Fusion on for the current session and saves it as your global default. The lead model does not change, and Pi's own `/model` still controls it.
-
-After that, give Pi tasks as usual:
+Send tasks in plain language and the lead decides what to delegate:
 
 ```text
 Add CSV export to the reports page. Settle the design first, then hand the
 implementation and focused tests to the sidekick. Review the full diff and
 test output before reporting back.
+```
+
+Optional: to set the sidekick model by hand instead of picking it, use the exact identifier from Pi's `/model` list:
+
+```text
+/fusion model provider/model-id
 ```
 
 ## How it works
@@ -67,23 +69,38 @@ Sidekick transcripts are saved under `~/.pi/agent/fusion/sessions/`. `/fusion st
 
 ## Commands
 
+### Daily use
+
 | Command | Effect |
 | --- | --- |
-| `/fusion` | Menu: choose sidekick model, turn on/off, status, stop |
-| `/fusion model provider/model-id` | Set the sidekick model and turn Fusion on |
-| `/fusion-model provider/model-id` | Shortcut for the above; with no argument it shows status |
-| `/fusion on` / `/fusion off` | Turn on (needs a model) / stop current work and turn off |
+| `/fusion` | Open settings. The first time it opens the model picker; afterwards it shows the sidekick, an on/off toggle and details. |
+| `/fusion-model` | Open the model picker to choose or change the sidekick. |
+| `/fusion off` | Stop current work and turn Fusion off. The setting is remembered for later launches. |
+| `/fusion status` | Show details: limits, defaults file, sidekick session file and last handoff usage. |
+
+`/fusion on` needs a sidekick model first; without one it opens the picker. Turning Fusion on or off from the settings view needs no model identifier.
+
+### Advanced commands
+
+| Command | Effect |
+| --- | --- |
+| `/fusion model provider/model-id` | Set the default sidekick model by hand and turn Fusion on |
+| `/fusion assign provider/model-id` | Use a physical sidekick model on this session branch; keep the current child context and global defaults |
+| `/fusion compact` | Compact an idle sidekick, retaining delivered handoff text verbatim; summary requests are billed |
+| `/fusion on` / `/fusion off` | Enable / stop current work and disable |
 | `/fusion thinking <level>` | `off`, `minimal`, `low`, `medium` (default), `high`, `xhigh`, `max`. The SDK limits this to what the model supports |
 | `/fusion tools coding` / `readonly` | Sidekick tool set; default `coding` |
 | `/fusion timeout <minutes>` | Total time limit per handoff, 1–240; default 15 |
 | `/fusion turns <count>` | Turn limit per handoff, 1–1000; default 80 |
 | `/fusion reminders on` / `off` | One-time reminders on the first message and the lead's first direct edit; default on |
 | `/fusion routing jev` / `off` | Jev routing advice; default off |
-| `/fusion status` | State, sidekick model, limits, defaults file, sidekick session file, last handoff usage |
 | `/fusion stop` | Cancel the current sidekick run; keeps its context and file changes |
 | `/fusion reset` | Stop the sidekick and drop its saved context pointer (see below) |
+| `/fusion help` | List every command |
 
 Stop active work with `/fusion stop` before changing the sidekick model or worker settings.
+
+Model changes preserve the idle child session. Assignment changes do not change its role or tools. Compaction uses Pi's scheduling and a local handoff-preservation adapter; it does not implement Devin's asynchronous spawn/apply/hard scheduler. When the preserved text and remaining context cannot fit the estimated model budget, compaction stops with an error instead of dropping handoff text. Failed and cancelled summary attempts with reported usage are included in Fusion usage.
 
 ## Global defaults and session state
 
@@ -100,7 +117,7 @@ If `PI_CODING_AGENT_DIR` is set, this file (and the sidekick sessions directory)
 - On reload, an older session that already had a sidekick model is copied into the defaults once, but only if no defaults file exists yet. An existing file is never overwritten this way.
 - If the file can't be read or is invalid, Pi shows a warning and the session falls back to the built-in defaults.
 - `PI_FUSION_MODEL` only pre-fills the sidekick model when none is set. It never turns Fusion on by itself.
-- Sidekick history, last-handoff results, Jev advice and usage totals stay with each session branch. None are written to the defaults file. Credentials remain in Pi's provider configuration or the environment; Fusion does not store them.
+- The `/fusion assign` model override, sidekick history, last-handoff results, Jev advice and usage totals stay with each session branch. None are written to the defaults file. Credentials remain in Pi's provider configuration or the environment; Fusion does not store them.
 
 ## Optional Jev routing advice
 

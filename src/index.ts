@@ -47,7 +47,7 @@ export default function fusion(pi: ExtensionAPI) {
         render: (width) => fusionLines({
           lead: context?.model ? `${context.model.provider}/${context.model.id}` : 'lead',
           leadThinking: context?.thinkingLevel ?? pi.getThinkingLevel(),
-          sidekick: controller?.modelInfo?.model ?? state.config.model ?? 'choose sidekick',
+          sidekick: controller?.modelInfo?.model ?? state.assignment?.model ?? state.config.model ?? 'choose sidekick',
           sidekickThinking: controller?.modelInfo?.thinking ?? state.config.thinking,
           leadActive, sidekickActive: controller?.modelActive ?? false,
           routing: state.config.routing === 'jev' && state.routeAdvice
@@ -80,7 +80,7 @@ export default function fusion(pi: ExtensionAPI) {
     if (!state.config.model && process.env.PI_FUSION_MODEL) state.config.model = parseModel(process.env.PI_FUSION_MODEL);
     const ownState = state;
     controller = new FusionController(state, {
-      create: () => createSidekick({ ctx, config: ownState.config, checkpoint: ownState.checkpoint, settings: pi.getSettings() }),
+      create: () => createSidekick({ ctx, config: { ...ownState.config, model: ownState.assignment?.model ?? ownState.config.model }, checkpoint: ownState.checkpoint, settings: pi.getSettings() }),
       changed: () => { if (state === ownState) save(); },
       completed: (run) => {
         if (!active || state !== ownState || !state.enabled) return;
@@ -205,17 +205,47 @@ export default function fusion(pi: ExtensionAPI) {
     },
   });
 
+  function overview(ctx: ExtensionContext) {
+    return [
+      `Fusion ${state.enabled ? 'on' : 'off'}`,
+      `Lead: ${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : '(current Pi model)'}`,
+      `Sidekick: ${controller?.modelInfo?.model ?? state.assignment?.model ?? state.config.model ?? '(not selected)'}`,
+      state.enabled ? 'Send tasks as usual. Fusion is ready.' : 'Open /fusion to turn on or choose a sidekick.',
+    ].join('\n');
+  }
+  async function chooseModel(ctx: ExtensionCommandContext) {
+    if (!ctx.hasUI) {
+      ctx.ui.notify('Choose a sidekick with /fusion model provider/model-id. Use an available model from Pi.', 'info');
+      return;
+    }
+    if (requireController(ctx).running) {
+      ctx.ui.notify('The sidekick is busy. Open /fusion and stop the current work before changing models.', 'warning');
+      return;
+    }
+    const models = ctx.modelRegistry.getAvailable().filter(m => m.api !== 'pi-virtual');
+    if (!models.length) {
+      ctx.ui.notify('No sidekick models are available. Set up a provider with /login in Pi, then open /fusion again.', 'warning');
+      return;
+    }
+    const current = state.assignment?.model ?? state.config.model;
+    const references = models.map(m => `${m.provider}/${m.id}`);
+    references.sort((a, b) => Number(b === current) - Number(a === current) || a.localeCompare(b));
+    const picked = await ctx.ui.select('Choose sidekick model — selecting turns Fusion on', references);
+    if (picked) await configureModel(picked, ctx);
+  }
   async function configureModel(value: string, ctx: ExtensionContext) {
     const modelRef = parseModel(value);
     const slash = modelRef.indexOf('/');
     const model = ctx.modelRegistry.find(modelRef.slice(0, slash), modelRef.slice(slash + 1));
-    if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) throw new Error(`Model unavailable or not authenticated: ${modelRef}`);
-    await requireController(ctx).release();
+    if (!model || model.api === 'pi-virtual' || !ctx.modelRegistry.hasConfiguredAuth(model)) throw new Error(`Model unavailable or not authenticated: ${modelRef}`);
+    // Replacing a configured default re-points the live idle child and keeps its context.
+    await requireController(ctx).assignModel(modelRef);
     state.config.model = modelRef;
     state.enabled = true;
+    state.assignment = undefined;
     save(); syncTools();
     persistPreferences(ctx);
-    ctx.ui.notify(`Fusion on. Lead unchanged; sidekick: ${modelRef}`, 'info');
+    ctx.ui.notify(overview(ctx), 'info');
   }
   function status() {
     return [
@@ -225,41 +255,71 @@ export default function fusion(pi: ExtensionAPI) {
       `State: ${controller?.running ? controller.progress : state.last?.status ?? 'ready'}`,
       `Routing: ${state.config.routing}${state.routeAdvice ? ` → ${state.routeAdvice.recommendation} (${state.routeAdvice.model ?? 'fallback'}, ${state.routeAdvice.latencyMs}ms)` : ''}`,
       `Defaults: ${preferencesPath()}`,
+      `Assigned sidekick: ${controller?.modelInfo?.model ?? state.assignment?.model ?? state.config.model ?? '(not selected)'}`,
       state.routingUsage ? `Jev: ${state.routingUsage.requests} recorded requests, ${state.routingUsage.input} input / ${state.routingUsage.output} output tokens (separate from /cost)` : '',
       `Session: ${state.checkpoint?.file ?? '(created on first handoff)'}`,
       state.last ? `Last handoff: ${state.last.usage.totalTokens} tokens, $${state.last.usage.cost.total.toFixed(4)} (reported API usage)` : '',
     ].filter(Boolean).join('\n');
   }
-  const help = '/fusion on|off|status|model provider/model|thinking level|tools coding/readonly|timeout minutes|turns count|reminders on/off|routing jev/off|stop|reset';
+  const help = [
+    '/fusion — open settings; choose a sidekick once, then send tasks normally',
+    '/fusion-model — choose or change the sidekick model',
+    '/fusion on · /fusion off — enable or disable',
+    '/fusion status — show details',
+    '/fusion stop — stop current work, keeping context',
+    'Advanced (optional):',
+    '/fusion model provider/model-id — save the default sidekick model',
+    '/fusion assign provider/model-id — override the model on this branch',
+    '/fusion compact — compact the idle sidekick',
+    '/fusion reset — start fresh; existing files are kept',
+    '/fusion thinking level · /fusion tools coding|readonly',
+    '/fusion timeout minutes · /fusion turns count',
+    '/fusion reminders on|off · /fusion routing jev|off',
+  ].join('\n');
   async function command(args: string, ctx: ExtensionCommandContext) {
     try {
       const c = requireController(ctx);
       if (!args.trim()) {
-        if (!ctx.hasUI) { ctx.ui.notify(`${status()}\n${help}`, 'info'); return; }
-        const choice = await ctx.ui.select('Fusion', ['Choose sidekick model', state.enabled ? 'Turn off' : 'Turn on', 'Status', 'Stop sidekick']);
+        if (!ctx.hasUI) { ctx.ui.notify(`${overview(ctx)}\nUse /fusion help for commands.`, 'info'); return; }
+        if (!state.config.model) { await chooseModel(ctx); return; }
+        const modelChoice = `Sidekick model: ${c.modelInfo?.model ?? state.assignment?.model ?? state.config.model}`;
+        const toggleChoice = state.enabled ? 'Turn off' : 'Turn on';
+        const choices = [modelChoice, toggleChoice, 'View details'];
+        if (c.running) choices.push('Stop current work');
+        const choice = await ctx.ui.select(`Fusion · ${state.enabled ? 'On' : 'Off'}`, choices);
         if (!choice) return;
-        if (choice === 'Choose sidekick model') {
-          const models = ctx.modelRegistry.getAvailable().map(m => `${m.provider}/${m.id}`);
-          const picked = await ctx.ui.select('Sidekick model (choose a lower-cost model)', models);
-          if (picked) await configureModel(picked, ctx);
-          return;
-        }
-        args = choice === 'Turn off' ? 'off' : choice === 'Turn on' ? 'on' : choice === 'Stop sidekick' ? 'stop' : 'status';
+        if (choice === modelChoice) { await chooseModel(ctx); return; }
+        args = choice === toggleChoice ? (state.enabled ? 'off' : 'on') : choice === 'Stop current work' ? 'stop' : 'status';
       }
       const [action, ...rest] = args.trim().split(/\s+/);
       const value = rest.join(' ');
-      if (action === 'model') { await configureModel(value, ctx); return; }
+      if (action === 'help') { ctx.ui.notify(help, 'info'); return; }
+      if (action === 'model') { if (value) await configureModel(value, ctx); else await chooseModel(ctx); return; }
+      if (action === 'assign') {
+        // Branch-local physical model for this session's sidekick; defaults are untouched.
+        const modelRef = parseModel(value);
+        const slash = modelRef.indexOf('/');
+        const model = ctx.modelRegistry.find(modelRef.slice(0, slash), modelRef.slice(slash + 1));
+        if (!model || model.api === 'pi-virtual' || !ctx.modelRegistry.hasConfiguredAuth(model)) throw new Error(`Model unavailable or not authenticated: ${modelRef}`);
+        if (!state.config.model) throw new Error('Choose a sidekick model with /fusion model provider/model first.');
+        if (!state.enabled) throw new Error('Fusion is off. Enable it with /fusion on.');
+        await c.assignModel(modelRef);
+        ctx.ui.notify(status(), 'info');
+        return;
+      }
+      if (action === 'compact') { await c.compact(); ctx.ui.notify(status(), 'info'); return; }
       if (action === 'status') { ctx.ui.notify(status(), 'info'); return; }
       if (action === 'stop') { await c.stop('Stopped by user.'); ctx.ui.notify(status(), 'info'); return; }
       if (action === 'off') { await c.stop('Fusion disabled by user.'); state.enabled = false; }
       else if (action === 'on') {
-        if (!state.config.model) throw new Error('Choose a sidekick model with /fusion model provider/model-id first.');
+        if (!state.config.model) { await chooseModel(ctx); return; }
         state.enabled = true;
       } else if (action === 'reset') {
         await c.stop('Sidekick reset by user.');
         await c.release();
         state.checkpoint = undefined;
         state.last = undefined;
+        state.assignment = undefined;
         state.editReminded = false;
         state.messageReminded = false;
         // pendingUsage remains owed to the lead's next tool result.
@@ -285,13 +345,13 @@ export default function fusion(pi: ExtensionAPI) {
         }
         await c.release();
         state.config = config;
-      } else { ctx.ui.notify(help, 'info'); return; }
+      } else { ctx.ui.notify('Unknown Fusion command. Open /fusion for settings, or /fusion help for commands.', 'warning'); return; }
       save(); syncTools(); renderStatus();
       if (action === 'on' || action === 'off' || ['thinking', 'tools', 'timeout', 'turns', 'reminders', 'routing'].includes(action!)) persistPreferences(ctx);
-      ctx.ui.notify(status(), 'info');
+      ctx.ui.notify(action === 'on' || action === 'off' ? overview(ctx) : status(), 'info');
     } catch (error) { ctx.ui.notify(String(error), 'error'); }
   }
-  pi.registerCommand('fusion', { description: 'Configure persistent lead/sidekick collaboration', handler: command });
-  pi.registerCommand('fusion-model', { description: 'Select the sidekick model (provider/model-id)',
-    handler: async (args, ctx) => command(args.trim() ? `model ${args.trim()}` : 'status', ctx) });
+  pi.registerCommand('fusion', { description: 'Open Fusion settings (choose a sidekick and turn on/off)', handler: command });
+  pi.registerCommand('fusion-model', { description: 'Choose or change the sidekick model',
+    handler: async (args, ctx) => command(args.trim() ? `model ${args.trim()}` : 'model', ctx) });
 }

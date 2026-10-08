@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "target": {
+    "versionDirectory": "3000.11.3",
+    "sha256": "7ef3859e68d4eabc0115e51898fcd4eab1edde753c27a472349ef551180b38ff",
+    "format": "Mach-O arm64",
+    "imageBase": "0x100000000"
+  },
+  "sourceKinds": {
+    "recoveredSymbols": "Names reconstructed from orphan nodes left in LC_DYLD_INFO_ONLY export data, not normal active exports or recovered Rust source.",
+    "instructions": "Bounded objdump ARM64 output; regions use LC_FUNCTION_STARTS boundaries.",
+    "officialArchitecture": "Public article, separately attributed from local CLI evidence."
+  },
+  "reproduction": {
+    "disassembly": "objdump -d --start-address=<start> --stop-address=<endExclusive> <local-binary>",
+    "symbolRecovery": "Normal nm/exports output is insufficient for this binary. Remaining orphan export nodes were parsed and parent paths reconstructed.",
+    "requiredCheck": "Confirm target SHA-256 before using any fixed addresses. These addresses are specific to this build.",
+    "runtimeTrace": "Not performed; static facts are not proof of enabled runtime paths."
+  },
+  "symbols": [
+    {
+      "address": "0x1015e150c",
+      "mangledName": "_RNvMs0_NtCs62t8DluoVwI_12chisel_agent12local_fusionNtB5_18LocalFusionSession10activation",
+      "trieOffset": 202139,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1015e15bc",
+      "mangledName": "_RNvMs0_NtCs62t8DluoVwI_12chisel_agent12local_fusionNtB5_18LocalFusionSession20seed_persisted_heads",
+      "trieOffset": 202146,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1015e16cc",
+      "mangledName": "_RNvMs0_NtCs62t8DluoVwI_12chisel_agent12local_fusionNtB5_18LocalFusionSession7dormant",
+      "trieOffset": 202153,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1015f6308",
+      "mangledName": "_RNvMs_NtCs62t8DluoVwI_12chisel_agent10acp_serverNtB4_16FusionTransition15from_extensions",
+      "trieOffset": 389770,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1015f676c",
+      "mangledName": "_RNvMs_NtCs62t8DluoVwI_12chisel_agent10acp_serverNtB4_16FusionTransition15into_extensions",
+      "trieOffset": 389777,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1014ad970",
+      "mangledName": "_RNvMNtNtCs62t8DluoVwI_12chisel_agent12local_fusion20sidekick_inheritableNtB2_19SidekickInheritable3new",
+      "trieOffset": 185400,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1014b41c4",
+      "mangledName": "_RNvXs0_NtNtCs62t8DluoVwI_12chisel_agent12local_fusion20sidekick_inheritableNtB5_19SidekickInheritableNtNtCshpPl9TaJ7Zs_8affogato8subagent19SubagentInheritable20inherit_for_subagent",
+      "trieOffset": 869873,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x10067b55c",
+      "mangledName": "_RNvMs0_NtNtCse4dWUJToQR3_9agent_ext9compactor20async_file_compactorNtB5_18AsyncFileCompactor46new_self_summarizing_with_compaction_threshold",
+      "trieOffset": 210573,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x100682244",
+      "mangledName": "_RNvXs0_NtNtCse4dWUJToQR3_9agent_ext9compactor15handoff_historyNtB5_21HandoffHistoryHandlerNtNtB7_9summarize20PinnedContentHandler7extract",
+      "trieOffset": 872724,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x10161024c",
+      "mangledName": "_RNvXsa_NtCs62t8DluoVwI_12chisel_agent12local_fusionNtB5_17SidekickHeadStoreNtNtNtCsbxuNj126guI_7toolbox5tools19persistent_subagent9HeadStore4load",
+      "trieOffset": 1062746,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x101610290",
+      "mangledName": "_RNvXsa_NtCs62t8DluoVwI_12chisel_agent12local_fusionNtB5_17SidekickHeadStoreNtNtNtCsbxuNj126guI_7toolbox5tools19persistent_subagent9HeadStore4save",
+      "trieOffset": 1062753,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1024a4df4",
+      "mangledName": "_RNvNtCsk8fAMTkDa8w_13chisel_server3acp23fusion_pairing_resolver",
+      "trieOffset": 631743,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1024a4f20",
+      "mangledName": "_RNvNtCsk8fAMTkDa8w_13chisel_server3acp24fusion_sidekick_resolver",
+      "trieOffset": 631750,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x1059860d8",
+      "mangledName": "_RNvMs2_NtCsgvia9OF73jH_19windsurf_api_client7backendNtB5_15WindsurfBackend22clear_model_assignment",
+      "trieOffset": 231507,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x100157de8",
+      "mangledName": "_RNvMNtCshpPl9TaJ7Zs_8affogato15cache_keepaliveNtB2_15KeepaliveConfig9for_model",
+      "trieOffset": 178240,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x100159318",
+      "mangledName": "_RNvMs5_NtCshpPl9TaJ7Zs_8affogato15cache_keepaliveNtB5_21CacheKeepaliveManager12stop_pinging",
+      "trieOffset": 351954,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x100159690",
+      "mangledName": "_RNvMs5_NtCshpPl9TaJ7Zs_8affogato15cache_keepaliveNtB5_21CacheKeepaliveManager3new",
+      "trieOffset": 351960,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x10015d2cc",
+      "mangledName": "_RNvXsu_NtCshpPl9TaJ7Zs_8affogato15cache_keepaliveNtB5_21CacheKeepaliveManagerINtNtCse3uJoQyxdjw_7barista7harness12EventHandlerNtNtB7_11event_types10CompactionE6handle",
+      "trieOffset": 1110664,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x10015d310",
+      "mangledName": "_RNvXsv_NtCshpPl9TaJ7Zs_8affogato15cache_keepaliveNtB5_21CacheKeepaliveManagerINtNtCse3uJoQyxdjw_7barista7harness12EventHandlerNtNtB7_11event_types8PostStopE6handle",
+      "trieOffset": 1112107,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x10015d45c",
+      "mangledName": "_RNvXsx_NtCshpPl9TaJ7Zs_8affogato15cache_keepaliveNtB5_21LeadIdleKeepaliveStopINtNtCse3uJoQyxdjw_7barista7harness12EventHandlerNtNtB7_11event_types8PostStopE6handle",
+      "trieOffset": 1114329,
+      "evidence": "recovered orphan export node; not execution proof"
+    },
+    {
+      "address": "0x101944b24",
+      "mangledName": "_RNvXs0_NtNtCs62t8DluoVwI_12chisel_agent12local_fusion8guidanceNtB5_26LocalFusionGuidanceHandlerINtNtCse3uJoQyxdjw_7barista7harness12EventHandlerNtNtCshpPl9TaJ7Zs_8affogato11event_types19PreActionGenerationE6handle",
+      "trieOffset": 869880,
+      "evidence": "recovered orphan export node; not execution proof"
+    }
+  ],
+  "inspectedRegions": [
+    {
+      "label": "SidekickInheritable::new",
+      "start": "0x1014ad970",
+      "endExclusive": "0x1014adbf0"
+    },
+    {
+      "label": "LocalFusionSession::activation",
+      "start": "0x1015e150c",
+      "endExclusive": "0x1015e15bc"
+    },
+    {
+      "label": "LocalFusionSession::seed_persisted_heads",
+      "start": "0x1015e15bc",
+      "endExclusive": "0x1015e16cc"
+    },
+    {
+      "label": "LocalFusionSession::dormant",
+      "start": "0x1015e16cc",
+      "endExclusive": "0x1015e17c0"
+    },
+    {
+      "label": "SidekickHeadStore::load future wrapper",
+      "start": "0x10161024c",
+      "endExclusive": "0x101610290"
+    },
+    {
+      "label": "SidekickHeadStore::save future wrapper",
+      "start": "0x101610290",
+      "endExclusive": "0x1016102ec"
+    },
+    {
+      "label": "SidekickInheritable::inherit_for_subagent future wrapper",
+      "start": "0x1014b41c4",
+      "endExclusive": "0x1014b421c"
+    }
+  ],
+  "facts": [
+    {
+      "id": "sidekick-async-compactor-call",
+      "evidence": "inspected instructions",
+      "functionStart": "0x1014ad970",
+      "instructionAddress": "0x1014ada54",
+      "instructionWord": "97c736c2",
+      "decodedInstruction": "bl 0x10067b55c",
+      "targetSymbol": "AsyncFileCompactor::new_self_summarizing_with_compaction_threshold",
+      "limits": "Direct static call from SidekickInheritable::new; caller execution for an account not established."
+    },
+    {
+      "id": "sidekick-handoff-pinned-handler",
+      "evidence": "inspected instructions and vtable data",
+      "functionStart": "0x1014ad970",
+      "vtableReferenceInstructions": [
+        "0x1014ad9fc",
+        "0x1014ada00",
+        "0x1014ada04"
+      ],
+      "vtableAddress": "0x109e85c78",
+      "methodSlotOffset": 24,
+      "methodAddress": "0x100682244",
+      "targetSymbol": "HandoffHistoryHandler::extract",
+      "limits": "Static constructor wiring; complete preservation/application behavior needs the async implementation and runtime trace."
+    },
+    {
+      "id": "sidekick-head-seeding",
+      "evidence": "inspected instructions",
+      "functionStart": "0x1015e15bc",
+      "instructionRange": [
+        "0x1015e15d4",
+        "0x1015e160c"
+      ],
+      "literalComparison": "sidekick",
+      "limits": "Function scans entries for an 8-byte key and seeds stored head state. No automatic routing event is implied."
+    },
+    {
+      "id": "assign-model-rpc",
+      "evidence": "previously inspected instructions",
+      "functionStart": "0x1024983cc",
+      "instructionRange": [
+        "0x102498768",
+        "0x102498780"
+      ],
+      "endpoint": "/exa.api_server_pb.ApiServerService/AssignModel",
+      "limits": "Assignment request endpoint confirmed; request schema, classification policy and service-side behavior unresolved."
+    },
+    {
+      "id": "compaction-time-model-routing",
+      "evidence": "official architecture description",
+      "source": "https://cognition.com/blog/devin-fusion#dynamic-routing",
+      "limits": "Classifier identity, inputs and thresholds unpublished; full connection to the inspected local CLI not established."
+    }
+  ]
+}

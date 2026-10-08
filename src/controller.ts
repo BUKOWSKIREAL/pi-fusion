@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Usage } from '@earendil-works/pi-ai';
-import { addUsage, zeroUsage, type Checkpoint, type FusionState, type RunRecord } from './state.ts';
+import { addUsage, parseModel, zeroUsage, type Checkpoint, type FusionState, type RunRecord } from './state.ts';
 
 export interface DriverResult { report: string; failed: boolean; usage: Usage }
+export interface MaintenanceResult { usage: Usage; error?: string }
 export interface SidekickDriver {
   run(message: string, onProgress: (text: string) => void, onActivity?: (active: boolean) => void): Promise<DriverResult>;
   // False means the run settled before the update could be delivered.
@@ -11,6 +12,9 @@ export interface SidekickDriver {
   checkpoint(): Checkpoint | undefined;
   usage?(): Usage;
   modelInfo?(): { model: string; thinking: string };
+  // Idle-only maintenance; both reject while a handoff is in flight.
+  assignModel?(model: string): Promise<void>;
+  compact?(): Promise<MaintenanceResult>;
   dispose(): void;
 }
 export interface ControllerHooks {
@@ -33,11 +37,12 @@ export class FusionController {
   private active?: Job;
   private gate: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private maintaining = false;
   private listeners = new Set<(text: string) => void>();
   progress = '';
   modelActive = false;
   constructor(readonly state: FusionState, private hooks: ControllerHooks) {}
-  get running() { return !!this.active; }
+  get running() { return !!this.active || this.maintaining; }
   get modelInfo() { return this.driver?.modelInfo?.(); }
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.gate.then(fn, fn);
@@ -144,6 +149,11 @@ export class FusionController {
     }
   }
   async stop(reason: string) {
+    if (this.maintaining) {
+      await this.driver?.abort();
+      await this.gate;
+      // Fall through: a dispatch queued behind maintenance must not escape this stop.
+    }
     const job = this.active;
     if (!job) return;
     job.cancelReason = reason;
@@ -151,6 +161,44 @@ export class FusionController {
     job.background = false;
     await this.driver?.abort();
     await job.done;
+  }
+  // Branch-local physical model for the persistent child; the default is untouched.
+  async assignModel(model: string) {
+    const reference = parseModel(model);
+    return this.exclusive(async () => {
+      if (this.closed) throw new Error('Fusion session is closed.');
+      if (this.active) throw new Error('Stop the active sidekick before changing its assignment.');
+      if (this.driver) {
+        if (!this.driver.assignModel) throw new Error('Sidekick model assignment is unsupported.');
+        await this.driver.assignModel(reference);
+      }
+      this.state.assignment = { model: reference };
+      this.save();
+    });
+  }
+  // Pi scheduled compaction: summary requests under the current model (a split turn uses two), with the
+  // delivered handoff text pinned by the child extension. Not an async apply.
+  async compact() {
+    return this.exclusive(async () => {
+      if (this.closed) throw new Error('Fusion session is closed.');
+      if (this.active) throw new Error('Stop the active sidekick before compacting its context.');
+      if (!this.state.enabled) throw new Error('Fusion is off. Enable it with /fusion on.');
+      if (!this.driver) this.driver = await this.hooks.create();
+      if (this.closed) { this.driver.dispose(); this.driver = undefined; throw new Error('Fusion session closed during startup.'); }
+      if (!this.driver.compact) throw new Error('Sidekick compaction is unsupported.');
+      this.maintaining = true;
+      this.progress = 'Compacting sidekick';
+      this.hooks.changed();
+      try {
+        const result = await this.driver.compact();
+        this.state.pendingUsage = addUsage(this.state.pendingUsage, result.usage);
+        if (result.error) throw new Error(result.error);
+      } finally {
+        this.maintaining = false;
+        this.progress = this.state.last?.status ?? 'ready';
+        this.save();
+      }
+    });
   }
   claimUsage(): Usage {
     const usage = this.state.pendingUsage;
@@ -169,6 +217,8 @@ export class FusionController {
   }
   async close() {
     this.closed = true;
+    // Aborting the maintenance operation lets its queued exclusive block unwind.
+    if (this.maintaining) await this.driver?.abort();
     await this.gate;
     await this.stop('Session closed; handoff cancelled. Context retained.');
     this.save();
